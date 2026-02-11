@@ -134,33 +134,6 @@ function RemoteNote:onShowNoteQr(highlight_index, is_new_note)
 
     -- Show Dialog (protected call)
     local ok_ui, dialog_or_err = pcall(function()
-        local description_widget = TextBoxWidget:new{
-            text = _("On another device, connect to the same network as your reader and open the link below:"),
-            face = self.dialog_font_face,
-            alignment = "left",
-        }
-        local qr_code = FrameContainer:new{
-            padding = Size.padding.large,
-            bordersize = 0,
-            QRWidget:new{
-                text = server_url,
-                width = qr_size,
-                height = qr_size,
-            }
-        }
-        local url_widget = TextBoxWidget:new{
-            text = server_url,
-            face = self.dialog_font_face,
-            alignment = "center",
-        }
-        
-        local content = VerticalGroup:new{
-            align = "center",
-            description_widget,
-            qr_code,
-            url_widget,
-        }
-
         local dialog = ButtonDialog:new{
             buttons = {{
                 {
@@ -176,6 +149,38 @@ function RemoteNote:onShowNoteQr(highlight_index, is_new_note)
                 self.dialog = nil
             end
         }
+
+        local available_width = dialog:getAddedWidgetAvailableWidth()
+
+        local description_widget = TextBoxWidget:new{
+            text = _("On another device, connect to the same network as your reader and open the link below:"),
+            face = self.dialog_font_face,
+            alignment = "left",
+            width = available_width,
+        }
+        local qr_code = FrameContainer:new{
+            padding = Size.padding.large,
+            bordersize = 0,
+            QRWidget:new{
+                text = server_url,
+                width = qr_size,
+                height = qr_size,
+            }
+        }
+        local url_widget = TextBoxWidget:new{
+            text = server_url,
+            face = self.dialog_font_face,
+            alignment = "center",
+            width = available_width,
+        }
+        
+        local content = VerticalGroup:new{
+            align = "center",
+            description_widget,
+            qr_code,
+            url_widget,
+        }
+
         dialog:addWidget(content)
         return dialog
     end)
