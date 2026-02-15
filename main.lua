@@ -50,7 +50,7 @@ function RemoteNote:init()
           local connect_callback = function()
             highlight_manager:onClose()
             if index then
-              self:onShowNoteQr(index, is_new_note)
+              self:openRemoteNoteQrDialog(index, is_new_note)
             end
           end
 
@@ -63,7 +63,7 @@ end
 
 function RemoteNote:CloseServer()
   if self.server then
-    logger.info("Closing server")
+    logger.info("RemoteNote: Closing server")
 
     -- Plug the hole in the Kindle's firewall
     if Device:isKindle() then
@@ -81,7 +81,7 @@ function RemoteNote:CloseServer()
   end
 end
 
-function RemoteNote:onShowNoteQr(highlight_index, is_new_note)
+function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
   -- Cleanup existing server if any
   self:CloseServer()
 
@@ -127,7 +127,7 @@ function RemoteNote:onShowNoteQr(highlight_index, is_new_note)
   local cleanup = function()
     self:CloseServer()
     if is_new_note and highlight_index then
-      logger.info("Removing cancelled highlight")
+      logger.info("RemoteNote: Removing cancelled highlight")
       self.ui.highlight:deleteHighlight(highlight_index)
     end
   end
@@ -190,7 +190,7 @@ function RemoteNote:onShowNoteQr(highlight_index, is_new_note)
     logger.err("RemoteNote: Error creating UI:", dialog_or_err)
     cleanup()
     UIManager:show(InfoMessage:new {
-      text = T(_("Error showing QR code: %1"), dialog_or_err),
+      text = T(_("Error starting RemoteNote: %1"), dialog_or_err),
     })
     return
   end
