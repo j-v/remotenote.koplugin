@@ -1,4 +1,5 @@
 local ButtonDialog = require("ui/widget/buttondialog")
+local InputDialog = require("ui/widget/inputdialog")
 local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
 local QRWidget = require("ui/widget/qrwidget")
@@ -31,9 +32,11 @@ end
 
 local RemoteNote = WidgetContainer:extend {
   name = "remotenote",
+  is_doc_only = false,
 }
 
 function RemoteNote:init()
+  self.port = G_reader_settings:readSetting("remotenote_port") or 8089
   self.dialog_font_face = Font:getFace("infofont")
   self.ui.menu:registerToMainMenu(self)
   if self.ui.highlight then
@@ -85,8 +88,6 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
   -- Cleanup existing server if any
   self:CloseServer()
 
-  -- Find a port
-  self.port = 8089
   -- Get local IP
   local ip = _("Unknown IP")
   ip = get_local_ip()
@@ -292,7 +293,61 @@ function RemoteNote:handleRequest(data, client, highlight_index)
   end
 end
 
+function RemoteNote:show_port_dialog(touchmenu_instance)
+  local port_dialog
+  port_dialog = InputDialog:new{
+    title = _("Remote Note Port"),
+    input = tostring(self.port),
+    input_type = "number",
+    buttons = {
+      {
+        {
+          text = _("Cancel"),
+          id = "close",
+          callback = function()
+            UIManager:close(port_dialog)
+          end,
+        },
+        {
+          text = _("Save"),
+          is_enter_default = true,
+          callback = function()
+            local value = tonumber(port_dialog:getInputText())
+            if value and value > 0 and value < 65536 then
+              self.port = value
+              G_reader_settings:saveSetting("remotenote_port", self.port)
+              UIManager:close(port_dialog)
+              if touchmenu_instance then touchmenu_instance:updateItems() end
+            else
+                UIManager:show(InfoMessage:new{
+                    text = _("Invalid port number"),
+                })
+            end
+          end,
+        },
+      },
+    },
+  }
+  UIManager:show(port_dialog)
+  port_dialog:onShowKeyboard()
+end
+
 function RemoteNote:addToMainMenu(menu_items)
+  menu_items.remotenote = {
+    text = _("Remote Note"),
+    sorting_hint = "tools",
+    sub_item_table = {
+      {
+        text_func = function()
+          return T(_("Port: %1"), self.port)
+        end,
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+          self:show_port_dialog(touchmenu_instance)
+        end,
+      },
+    }
+  }
 end
 
 return RemoteNote
