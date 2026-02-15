@@ -1,0 +1,69 @@
+# This is a GitHub Action workflow to automate the release process.
+# For more information about GitHub Actions, see: https://docs.github.com/en/actions
+
+name: Create Release
+
+# Controls when the workflow will run.
+on:
+  # Triggers the workflow on push events, but only for tags that start with 'v'.
+  # For example: v1.0, v1.2.3, v2.0-beta
+  push:
+    tags:
+      - 'v*'
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel.
+jobs:
+  # This workflow contains a single job called "build_and_release".
+  build_and_release:
+    # The type of runner that the job will run on.
+    runs-on: ubuntu-latest
+    # Grant permissions for the GITHUB_TOKEN to create a release.
+    permissions:
+      contents: write
+
+    # Steps represent a sequence of tasks that will be executed as part of the job.
+    steps:
+      # Step 1: Check out your repository under $GITHUB_WORKSPACE, so your job can access it.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Update version in _meta.lua based on the Git tag.
+      - name: Update version in _meta.lua
+        run: |
+          # Extract version from tag (e.g., v1.2.3 -> 1.2.3)
+          VERSION=${GITHUB_REF_NAME#v}
+          echo "Updating version to ${VERSION} in _meta.lua"
+          # Use sed to replace only the version number, preserving the rest of the line (like the trailing comma).
+          # This ensures the version is stored as a string, enclosed in double quotes.
+          sed -i -E "s/(version\s*=\s*)[^,]+/\1\"${VERSION}\"/" _meta.lua
+          cat _meta.lua
+
+      # Step 3: Create the directory structure and archive the project source into a zip file.
+      # We create a directory with the correct name first, copy the files into it, and then zip that directory.
+      - name: Archive project source with zip
+        run: |
+          PACKAGE_NAME="remotenote.koplugin"
+          ARCHIVE_NAME="${PACKAGE_NAME}-${GITHUB_REF_NAME}.zip"
+          # Create the directory structure for zipping
+          mkdir "$PACKAGE_NAME"
+          # Copy project files into the directory using a tar pipe, excluding unwanted files.
+          # This archives the current directory and immediately extracts it into the target directory.
+          tar c --exclude='./.*' --exclude='./*.md' --exclude="./$PACKAGE_NAME" . | tar x -C "$PACKAGE_NAME"
+          # Remove development helper files from the l10n directory (keep only .po files)
+          echo "Cleaning up l10n directory, keeping only .po files..."
+          find "$PACKAGE_NAME/l10n" -type f ! -name '*.po' -print -delete
+          # Create the final zip archive from the cleaned directory
+          zip -r "$ARCHIVE_NAME" "$PACKAGE_NAME"
+
+      # Step 4: List files in the created archive for debugging purposes.
+      - name: List archive contents
+        run: unzip -l remotenote.koplugin-${GITHUB_REF_NAME}.zip
+
+      # Step 5: Create a GitHub Release and upload the archive as a release asset.
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          # Mark this release as a pre-release. Set to 'false' to create a full release.
+          prerelease: true
+          # The files to upload as release assets.
+          files: remotenote.koplugin-${{ github.ref_name }}.zip
