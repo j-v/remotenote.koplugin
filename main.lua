@@ -18,6 +18,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local url = require("socket.url")
 local Font = require("ui/font")
+local util  = require("util")
 
 local function get_local_ip()
   -- Any routable address outside your LAN works; 8.8.8.8:53 is common.
@@ -203,6 +204,12 @@ end
 function RemoteNote:handleRequest(data, client, highlight_index)
   local method, uri = data:match("^(%u+) ([^\n]*) HTTP/%d%.%d\r?\n.*")
   if method == "GET" then
+    local note_content = ""
+    local annotation = self.ui.annotation.annotations[highlight_index]
+    if annotation and annotation.note then
+      note_content = util.htmlEscape(annotation.note)
+    end
+
     local html = [[
             <html>
             <head>
@@ -212,7 +219,7 @@ function RemoteNote:handleRequest(data, client, highlight_index)
             <body>
             <h2>Add Note</h2>
             <form method="POST">
-                <textarea name="note" style="width:100%; height:150px;"></textarea><br>
+                <textarea name="note" style="width:100%; height:150px;">]] .. note_content .. [[</textarea><br>
                 <input type="submit" value="Save Note" style="width:100%; height:50px;">
             </form>
             </body>
