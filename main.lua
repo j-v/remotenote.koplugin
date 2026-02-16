@@ -139,7 +139,7 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
     local dialog = ButtonDialog:new {
       buttons = { {
         {
-          text = _("Close"),
+          text = _("Cancel"),
           callback = function()
             cleanup()
             UIManager:close(self.dialog)
