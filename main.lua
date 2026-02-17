@@ -82,6 +82,38 @@ function RemoteNote:init()
         return res
       end
     end
+
+    if self.ui.bookmark then
+        -- Hook ReaderBookmark:setBookmarkNote to inject Remote Note button
+        if self.ui.bookmark.setBookmarkNote then
+
+          local old_setBookmarkNote = self.ui.bookmark.setBookmarkNote
+          self.ui.bookmark.setBookmarkNote = function(bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
+            local old_uiManagerShow = UIManager.show
+            ---@diagnostic disable-next-line: duplicate-set-field
+            UIManager.show = function(uimgr, widget, ...)
+              if widget.title == _("Edit note") then
+                -- Determine index based on context (bookmark menu vs highlight)
+                local index
+                if bookmark_obj.bookmark_menu then
+                  index = bookmark_obj:getBookmarkItemIndex(item_or_index)
+                else
+                  index = item_or_index
+                end
+                self:injectRemoteNoteButton(widget, index, is_new_note)
+              end
+
+              return old_uiManagerShow(uimgr, widget, ...)
+            end
+    
+            local ok, res = pcall(old_setBookmarkNote, bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
+            UIManager.show = old_uiManagerShow
+            if not ok then error(res) end
+
+            return res
+          end
+        end
+    end
   end
 end
 
@@ -105,28 +137,37 @@ function RemoteNote:CloseServer()
   end
 end
 
-function RemoteNote:injectRemoteNoteButton(widget, index)
-    if not widget.buttons_table then return end
+function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
+    -- InputDialog uses buttons for reinit, TextViewer uses buttons_table
+    local buttons_table = widget.buttons or widget.buttons_table
+    if not buttons_table then return end
 
     local remote_button = {
         {
             text = _("Remote edit note"),
             callback = function()
                 UIManager:close(widget)
-                -- assuming we are injecting for showHighlightNoteOrDialog, is_new_note is false
-                local is_new_note = false
                 self:openRemoteNoteQrDialog(index, is_new_note)
             end,
         }
     }
     
     -- Insert as a new row at the end
-    table.insert(widget.buttons_table, remote_button)
+    table.insert(buttons_table, remote_button)
 
-    -- Force re-init to update the button table widget
-    if widget.reinit then
-        widget:reinit()
+    -- Hack to disable restoring original InputDialog buttons, ensures RemoteNote button shown
+    if widget._backupRestoreButtons then
+      widget._backupRestoreButtons = function () end
     end
+
+    -- Wait for next tick to allow keyboard layout to initialize
+    UIManager:nextTick(function()
+      -- Force re-init to update the button table widget
+      if widget.reinit then
+          widget:reinit()
+      end
+    end
+    )
 end
 
 function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
