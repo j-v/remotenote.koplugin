@@ -4,6 +4,7 @@ local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
 local QRWidget = require("ui/widget/qrwidget")
 local SimpleTCPServer = require("ui/message/simpletcpserver")
+local SecureTCPServer = require("securetcpserver")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
 local Event = require("ui/event")
@@ -16,6 +17,7 @@ local socket = require("socket")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local joinPath = require("ffi/util").joinPath
 local url = require("socket.url")
 local Font = require("ui/font")
 local util  = require("util")
@@ -38,6 +40,7 @@ local RemoteNote = WidgetContainer:extend {
 
 function RemoteNote:init()
   self.port = G_reader_settings:readSetting("remotenote_port") or 8089
+  self.https_enabled = G_reader_settings:isTrue("remotenote_https_enabled")
   self.dialog_font_face = Font:getFace("infofont")
   self.ui.menu:registerToMainMenu(self)
   if self.ui.highlight then
@@ -208,13 +211,44 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
   end
 
   -- Start Server
-  self.server = SimpleTCPServer:new {
-    host = "*", -- bind to all interfaces
-    port = self.port,
-    receiveCallback = function(data, client)
-      return self:handleRequest(data, client, highlight_index)
-    end,
-  }
+  if self.https_enabled then
+    local current_plugin_dir = string.match(debug.getinfo(1).source, "^@(.*/)")
+    local cert_path = joinPath(current_plugin_dir, "cert.pem")
+    local key_path = joinPath(current_plugin_dir, "key.pem")
+
+    if not util.pathExists(cert_path) or not util.pathExists(key_path) then
+        UIManager:show(InfoMessage:new{
+            text = _("HTTPS enabled but certificates missing.\nPlease generate cert.pem and key.pem in the remotenote.koplugin directory or disable HTTPS."),
+            timeout = 5,
+        })
+        self:CloseServer()
+        return
+    end
+    
+    self.server = SecureTCPServer:new {
+        host = "*",
+        port = self.port,
+        ssl_params = {
+            mode = "server",
+            protocol = "any",
+            key = key_path,
+            certificate = cert_path,
+            options = {"all", "no_sslv2", "no_sslv3"},
+        },
+        receiveCallback = function(data, client)
+            return self:handleRequest(data, client, highlight_index)
+        end,
+    }
+  else
+    self.server = SimpleTCPServer:new {
+        host = "*",
+        port = self.port,
+        receiveCallback = function(data, client)
+        return self:handleRequest(data, client, highlight_index)
+        end,
+    }
+  end
+
   UIManager:insertZMQ(self.server)
   local ok_server, err = self.server:start()
   if not ok_server then
@@ -226,7 +260,8 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
     return
   end
 
-  local server_url = string.format("http://%s:%d/", ip, self.port)
+  local protocol = self.https_enabled and "https" or "http"
+  local server_url = string.format("%s://%s:%d/", protocol, ip, self.port)
 
   local qr_size = Device.screen:scaleBySize(350)
 
@@ -455,6 +490,17 @@ function RemoteNote:addToMainMenu(menu_items)
         keep_menu_open = true,
         callback = function(touchmenu_instance)
           self:show_port_dialog(touchmenu_instance)
+        end,
+      },
+      {
+        text_func = function()
+            return T(_("Enable HTTPS: %1"), self.https_enabled and _("On") or _("Off"))
+        end,
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
+            self.https_enabled = not self.https_enabled
+            G_reader_settings:saveSetting("remotenote_https_enabled", self.https_enabled)
+            if touchmenu_instance then touchmenu_instance:updateItems() end
         end,
       },
     }
