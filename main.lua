@@ -62,6 +62,26 @@ function RemoteNote:init()
         end,
       }
     end)
+
+    -- Hook ReaderHighlight:showHighlightNoteOrDialog to inject Remote Note button
+    if self.ui.highlight.showHighlightNoteOrDialog then
+      local old_showHighlightNoteOrDialog = self.ui.highlight.showHighlightNoteOrDialog
+      self.ui.highlight.showHighlightNoteOrDialog = function(highlight_obj, index)
+        local old_uiManagerShow = UIManager.show
+        ---@diagnostic disable-next-line: duplicate-set-field
+        UIManager.show = function(uimgr, widget, ...)
+          if widget.title == _("Note") then
+            self:injectRemoteNoteButton(widget, index)
+          end
+          return old_uiManagerShow(uimgr, widget, ...)
+        end
+
+        local ok, res = pcall(old_showHighlightNoteOrDialog, highlight_obj, index)
+        UIManager.show = old_uiManagerShow
+        if not ok then error(res) end
+        return res
+      end
+    end
   end
 end
 
@@ -83,6 +103,30 @@ function RemoteNote:CloseServer()
     self.server:stop()
     self.server = nil
   end
+end
+
+function RemoteNote:injectRemoteNoteButton(widget, index)
+    if not widget.buttons_table then return end
+
+    local remote_button = {
+        {
+            text = _("Remote edit note"),
+            callback = function()
+                UIManager:close(widget)
+                -- assuming we are injecting for showHighlightNoteOrDialog, is_new_note is false
+                local is_new_note = false
+                self:openRemoteNoteQrDialog(index, is_new_note)
+            end,
+        }
+    }
+    
+    -- Insert as a new row at the end
+    table.insert(widget.buttons_table, remote_button)
+
+    -- Force re-init to update the button table widget
+    if widget.reinit then
+        widget:reinit()
+    end
 end
 
 function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
