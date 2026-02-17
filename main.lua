@@ -367,7 +367,7 @@ function RemoteNote:handleRequest(data, client, highlight_index)
     client:send("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: " .. #html .. "\r\n\r\n" .. html)
     client:close()
   elseif method == "POST" then
-    local content_length = tonumber(data:match("Content%-Length: (%d+)"))
+    local content_length = tonumber(data:lower():match("content%-length: (%d+)"))
     if content_length then
       local body, err = client:receive(content_length)
       if body then
