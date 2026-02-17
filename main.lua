@@ -1,26 +1,26 @@
-local ButtonDialog = require("ui/widget/buttondialog")
-local InputDialog = require("ui/widget/inputdialog")
-local Device = require("device")
-local InfoMessage = require("ui/widget/infomessage")
-local QRWidget = require("ui/widget/qrwidget")
+local ButtonDialog    = require("ui/widget/buttondialog")
+local InputDialog     = require("ui/widget/inputdialog")
+local Device          = require("device")
+local InfoMessage     = require("ui/widget/infomessage")
+local QRWidget        = require("ui/widget/qrwidget")
 local SimpleTCPServer = require("ui/message/simpletcpserver")
 local SecureTCPServer = require("securetcpserver")
-local TextBoxWidget = require("ui/widget/textboxwidget")
-local UIManager = require("ui/uimanager")
-local Event = require("ui/event")
-local VerticalGroup = require("ui/widget/verticalgroup")
-local NetworkMgr = require("ui/network/manager")
+local TextBoxWidget   = require("ui/widget/textboxwidget")
+local UIManager       = require("ui/uimanager")
+local Event           = require("ui/event")
+local VerticalGroup   = require("ui/widget/verticalgroup")
+local NetworkMgr      = require("ui/network/manager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local FrameContainer = require("ui/widget/container/framecontainer")
-local Size = require("ui/size")
-local socket = require("socket")
-local logger = require("logger")
-local _ = require("gettext")
-local T = require("ffi/util").template
-local joinPath = require("ffi/util").joinPath
-local url = require("socket.url")
-local Font = require("ui/font")
-local util  = require("util")
+local FrameContainer  = require("ui/widget/container/framecontainer")
+local Size            = require("ui/size")
+local socket          = require("socket")
+local logger          = require("logger")
+local _               = require("gettext")
+local T               = require("ffi/util").template
+local joinPath        = require("ffi/util").joinPath
+local url             = require("socket.url")
+local Font            = require("ui/font")
+local util            = require("util")
 
 local function get_local_ip()
   -- Any routable address outside your LAN works; 8.8.8.8:53 is common.
@@ -87,35 +87,34 @@ function RemoteNote:init()
     end
 
     if self.ui.bookmark then
-        -- Hook ReaderBookmark:setBookmarkNote to inject Remote Note button
-        if self.ui.bookmark.setBookmarkNote then
-
-          local old_setBookmarkNote = self.ui.bookmark.setBookmarkNote
-          self.ui.bookmark.setBookmarkNote = function(bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
-            local old_uiManagerShow = UIManager.show
-            ---@diagnostic disable-next-line: duplicate-set-field
-            UIManager.show = function(uimgr, widget, ...)
-              if widget.title == _("Edit note") then
-                -- Determine index based on context (bookmark menu vs highlight)
-                local index
-                if bookmark_obj.bookmark_menu then
-                  index = bookmark_obj:getBookmarkItemIndex(item_or_index)
-                else
-                  index = item_or_index
-                end
-                self:injectRemoteNoteButton(widget, index, is_new_note)
+      -- Hook ReaderBookmark:setBookmarkNote to inject Remote Note button
+      if self.ui.bookmark.setBookmarkNote then
+        local old_setBookmarkNote = self.ui.bookmark.setBookmarkNote
+        self.ui.bookmark.setBookmarkNote = function(bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
+          local old_uiManagerShow = UIManager.show
+          ---@diagnostic disable-next-line: duplicate-set-field
+          UIManager.show = function(uimgr, widget, ...)
+            if widget.title == _("Edit note") then
+              -- Determine index based on context (bookmark menu vs highlight)
+              local index
+              if bookmark_obj.bookmark_menu then
+                index = bookmark_obj:getBookmarkItemIndex(item_or_index)
+              else
+                index = item_or_index
               end
-
-              return old_uiManagerShow(uimgr, widget, ...)
+              self:injectRemoteNoteButton(widget, index, is_new_note)
             end
-    
-            local ok, res = pcall(old_setBookmarkNote, bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
-            UIManager.show = old_uiManagerShow
-            if not ok then error(res) end
 
-            return res
+            return old_uiManagerShow(uimgr, widget, ...)
           end
+
+          local ok, res = pcall(old_setBookmarkNote, bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
+          UIManager.show = old_uiManagerShow
+          if not ok then error(res) end
+
+          return res
         end
+      end
     end
   end
 end
@@ -141,55 +140,55 @@ function RemoteNote:CloseServer()
 end
 
 function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
-    -- InputDialog uses buttons for reinit, TextViewer uses buttons_table
-    local buttons_table = widget.buttons or widget.buttons_table
-    if not buttons_table then return end
+  -- InputDialog uses buttons for reinit, TextViewer uses buttons_table
+  local buttons_table = widget.buttons or widget.buttons_table
+  if not buttons_table then return end
 
-    local remote_button_def = {
-        {
-            text = _("Remote edit note"),
-            callback = function()
-                UIManager:close(widget)
-                self:openRemoteNoteQrDialog(index, is_new_note)
-            end,
-        }
+  local remote_button_def = {
+    {
+      text = _("Remote edit note"),
+      callback = function()
+        UIManager:close(widget)
+        self:openRemoteNoteQrDialog(index, is_new_note)
+      end,
     }
+  }
 
-    local function add_button()
-        -- Avoid duplicates
-        for key, row in ipairs(buttons_table) do
-            for key2, btn in ipairs(row) do
-                if btn.text == _("Remote edit note") then
-                    return
-                end
-            end
+  local function add_button()
+    -- Avoid duplicates
+    for key, row in ipairs(buttons_table) do
+      for key2, btn in ipairs(row) do
+        if btn.text == _("Remote edit note") then
+          return
         end
-        table.insert(buttons_table, remote_button_def)
+      end
     end
+    table.insert(buttons_table, remote_button_def)
+  end
 
-    -- Initial add
-    add_button()
+  -- Initial add
+  add_button()
 
-    -- Hook _backupRestoreButtons to re-add our button after restore
-    if widget._backupRestoreButtons and not widget._remotenote_hooked then
-        local old_backupRestoreButtons = widget._backupRestoreButtons
-        widget._backupRestoreButtons = function(w)
-            old_backupRestoreButtons(w)
-            -- Re-acquire buttons table as it might have been replaced
-            buttons_table = w.buttons or w.buttons_table
-            add_button()
-        end
-        widget._remotenote_hooked = true
+  -- Hook _backupRestoreButtons to re-add our button after restore
+  if widget._backupRestoreButtons and not widget._remotenote_hooked then
+    local old_backupRestoreButtons = widget._backupRestoreButtons
+    widget._backupRestoreButtons = function(w)
+      old_backupRestoreButtons(w)
+      -- Re-acquire buttons table as it might have been replaced
+      buttons_table = w.buttons or w.buttons_table
+      add_button()
     end
+    widget._remotenote_hooked = true
+  end
 
-    -- Force keyboard layout to initialize
-    if widget.onShowKeyboard then
-      widget:onShowKeyboard(false)
-    end
-    -- Force re-init to update the button table widget
-    if widget.reinit then
-        widget:reinit()
-    end
+  -- Force keyboard layout to initialize
+  if widget.onShowKeyboard then
+    widget:onShowKeyboard(false)
+  end
+  -- Force re-init to update the button table widget
+  if widget.reinit then
+    widget:reinit()
+  end
 end
 
 function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
@@ -217,35 +216,34 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
     local key_path = joinPath(current_plugin_dir, "key.pem")
 
     if not util.pathExists(cert_path) or not util.pathExists(key_path) then
-        UIManager:show(InfoMessage:new{
-            text = _("HTTPS enabled but certificates missing.\nPlease generate cert.pem and key.pem in the remotenote.koplugin directory or disable HTTPS."),
-            timeout = 5,
-        })
-        self:CloseServer()
-        return
+      UIManager:show(InfoMessage:new {
+        text = _("HTTPS enabled but certificates missing.\nPlease generate cert.pem and key.pem in the remotenote.koplugin directory or disable HTTPS."),
+      })
+      self:CloseServer()
+      return
     end
-    
+
     self.server = SecureTCPServer:new {
-        host = "*",
-        port = self.port,
-        ssl_params = {
-            mode = "server",
-            protocol = "any",
-            key = key_path,
-            certificate = cert_path,
-            options = {"all", "no_sslv2", "no_sslv3"},
-        },
-        receiveCallback = function(data, client)
-            return self:handleRequest(data, client, highlight_index)
-        end,
+      host = "*",
+      port = self.port,
+      ssl_params = {
+        mode = "server",
+        protocol = "any",
+        key = key_path,
+        certificate = cert_path,
+        options = { "all", "no_sslv2", "no_sslv3" },
+      },
+      receiveCallback = function(data, client)
+        return self:handleRequest(data, client, highlight_index)
+      end,
     }
   else
     self.server = SimpleTCPServer:new {
-        host = "*",
-        port = self.port,
-        receiveCallback = function(data, client)
+      host = "*",
+      port = self.port,
+      receiveCallback = function(data, client)
         return self:handleRequest(data, client, highlight_index)
-        end,
+      end,
     }
   end
 
@@ -441,7 +439,7 @@ end
 
 function RemoteNote:show_port_dialog(touchmenu_instance)
   local port_dialog
-  port_dialog = InputDialog:new{
+  port_dialog = InputDialog:new {
     title = _("Remote Note Port"),
     input = tostring(self.port),
     input_type = "number",
@@ -465,9 +463,9 @@ function RemoteNote:show_port_dialog(touchmenu_instance)
               UIManager:close(port_dialog)
               if touchmenu_instance then touchmenu_instance:updateItems() end
             else
-                UIManager:show(InfoMessage:new{
-                    text = _("Invalid port number"),
-                })
+              UIManager:show(InfoMessage:new {
+                text = _("Invalid port number"),
+              })
             end
           end,
         },
@@ -493,14 +491,19 @@ function RemoteNote:addToMainMenu(menu_items)
         end,
       },
       {
-        text_func = function()
-            return T(_("Enable HTTPS: %1"), self.https_enabled and _("On") or _("Off"))
+        text = _("Enable HTTPS"),
+        checked_func = function()
+          return self.https_enabled
         end,
-        keep_menu_open = true,
         callback = function(touchmenu_instance)
-            self.https_enabled = not self.https_enabled
-            G_reader_settings:saveSetting("remotenote_https_enabled", self.https_enabled)
-            if touchmenu_instance then touchmenu_instance:updateItems() end
+          self.https_enabled = not self.https_enabled
+          G_reader_settings:saveSetting("remotenote_https_enabled", self.https_enabled)
+          if touchmenu_instance then touchmenu_instance:updateItems() end
+          if self.https_enabled then
+            UIManager:show(InfoMessage:new {
+              text = _("RemoteNote server will use cert.pem and key.pem located in plugins/remotenote.koplugin directory."),
+            })
+          end
         end,
       },
     }

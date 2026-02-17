@@ -42,3 +42,7 @@ luac.out
 *.i*86
 *.x86_64
 *.hex
+
+# SSL certs
+key.pem
+cert.pem
