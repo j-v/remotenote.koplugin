@@ -142,7 +142,7 @@ function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
     local buttons_table = widget.buttons or widget.buttons_table
     if not buttons_table then return end
 
-    local remote_button = {
+    local remote_button_def = {
         {
             text = _("Remote edit note"),
             callback = function()
@@ -151,23 +151,42 @@ function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
             end,
         }
     }
-    
-    -- Insert as a new row at the end
-    table.insert(buttons_table, remote_button)
 
-    -- Hack to disable restoring original InputDialog buttons, ensures RemoteNote button shown
-    if widget._backupRestoreButtons then
-      widget._backupRestoreButtons = function () end
+    local function add_button()
+        -- Avoid duplicates
+        for key, row in ipairs(buttons_table) do
+            for key2, btn in ipairs(row) do
+                if btn.text == _("Remote edit note") then
+                    return
+                end
+            end
+        end
+        table.insert(buttons_table, remote_button_def)
     end
 
-    -- Wait for next tick to allow keyboard layout to initialize
-    UIManager:nextTick(function()
-      -- Force re-init to update the button table widget
-      if widget.reinit then
-          widget:reinit()
-      end
+    -- Initial add
+    add_button()
+
+    -- Hook _backupRestoreButtons to re-add our button after restore
+    if widget._backupRestoreButtons and not widget._remotenote_hooked then
+        local old_backupRestoreButtons = widget._backupRestoreButtons
+        widget._backupRestoreButtons = function(w)
+            old_backupRestoreButtons(w)
+            -- Re-acquire buttons table as it might have been replaced
+            buttons_table = w.buttons or w.buttons_table
+            add_button()
+        end
+        widget._remotenote_hooked = true
     end
-    )
+
+    -- Force keyboard layout to initialize
+    if widget.onShowKeyboard then
+      widget:onShowKeyboard(false)
+    end
+    -- Force re-init to update the button table widget
+    if widget.reinit then
+        widget:reinit()
+    end
 end
 
 function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
