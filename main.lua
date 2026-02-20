@@ -234,8 +234,8 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
         certificate = cert_path,
         options = { "all", "no_sslv2", "no_sslv3" },
       },
-      receiveCallback = function(data, client)
-        return self:handleRequest(data, client, highlight_index)
+      receiveCallback = function(data, client, client_ip, client_port)
+        return self:handleRequest(data, client, highlight_index, client_ip)
       end,
     }
   else
@@ -243,7 +243,8 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
       host = "*",
       port = self.port,
       receiveCallback = function(data, client)
-        return self:handleRequest(data, client, highlight_index)
+        local client_ip, _ = client:getpeername()
+        return self:handleRequest(data, client, highlight_index, client_ip)
       end,
     }
   end
@@ -339,7 +340,7 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
   UIManager:show(self.dialog)
 end
 
-function RemoteNote:handleRequest(data, client, highlight_index)
+function RemoteNote:handleRequest(data, client, highlight_index, client_ip)
   local method, uri = data:match("^(%u+) ([^\n]*) HTTP/%d%.%d\r?\n.*")
   if method == "GET" then
     local note_content = ""
@@ -363,7 +364,8 @@ function RemoteNote:handleRequest(data, client, highlight_index)
             </body>
             </html>
         ]]
-    local client_ip, client_port = client:getpeername()
+    -- local client_ip = 'test'
+    -- local client_ip, client_port = client:getpeername()
     client:send("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: " .. #html .. "\r\n\r\n" .. html)
     client:close()
     UIManager:nextTick(function()
