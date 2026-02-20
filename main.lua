@@ -364,8 +364,6 @@ function RemoteNote:handleRequest(data, client, highlight_index, client_ip)
             </body>
             </html>
         ]]
-    -- local client_ip = 'test'
-    -- local client_ip, client_port = client:getpeername()
     client:send("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: " .. #html .. "\r\n\r\n" .. html)
     client:close()
     UIManager:nextTick(function()
