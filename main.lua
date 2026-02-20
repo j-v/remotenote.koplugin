@@ -192,6 +192,7 @@ function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
 end
 
 function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
+  self.is_new_note = is_new_note
   -- Cleanup existing server if any
   self:CloseServer()
 
@@ -362,8 +363,12 @@ function RemoteNote:handleRequest(data, client, highlight_index)
             </body>
             </html>
         ]]
+    local client_ip, client_port = client:getpeername()
     client:send("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: " .. #html .. "\r\n\r\n" .. html)
     client:close()
+    UIManager:nextTick(function()
+      self:showEditingDialog(highlight_index, client_ip)
+    end)
   elseif method == "POST" then
     local content_length = tonumber(data:lower():match("content%-length: (%d+)"))
     if content_length then
@@ -435,6 +440,54 @@ function RemoteNote:handleRequest(data, client, highlight_index)
     client:send("HTTP/1.0 405 Method Not Allowed\r\n\r\n")
     client:close()
   end
+end
+
+function RemoteNote:showEditingDialog(highlight_index, client_ip)
+  if self.dialog then
+    UIManager:close(self.dialog)
+  end
+
+  local cleanup = function()
+    self:CloseServer()
+    if self.is_new_note and highlight_index then
+      logger.info("RemoteNote: Removing cancelled highlight")
+      self.ui.highlight:deleteHighlight(highlight_index)
+    end
+  end
+
+  local dialog = ButtonDialog:new {
+    buttons = { {
+      {
+        text = _("Cancel"),
+        callback = function()
+          cleanup()
+          UIManager:close(self.dialog)
+        end,
+      }
+    } },
+    tap_close_callback = function()
+      cleanup()
+      self.dialog = nil
+    end
+  }
+
+  local available_width = dialog:getAddedWidgetAvailableWidth()
+
+  local text_content = _("Note is being edited...")
+  if client_ip then
+      text_content = T(_("Note is being edited by %1..."), client_ip)
+  end
+
+  local text_widget = TextBoxWidget:new {
+    text = text_content,
+    face = self.dialog_font_face,
+    alignment = "center",
+    width = available_width,
+  }
+
+  dialog:addWidget(text_widget)
+  self.dialog = dialog
+  UIManager:show(self.dialog)
 end
 
 function RemoteNote:show_port_dialog(touchmenu_instance)
