@@ -83,6 +83,7 @@ function RemoteNote:init()
   self.port = G_reader_settings:readSetting("remotenote_port") or 8089
   self.https_enabled = G_reader_settings:isTrue("remotenote_https_enabled")
   self.render_inline_button = G_reader_settings:isTrue("remotenote_render_inline_button")
+  self.inject_remote_input = G_reader_settings:readSetting("remotenote_inject_remote_input") ~= false
   self.dialog_font_face = Font:getFace("infofont")
   self.ui.menu:registerToMainMenu(self)
   if self.ui.highlight then
@@ -132,8 +133,8 @@ function RemoteNote:init()
   if InputDialog.init and not InputDialog._remotenote_hooked then
     local old_init = InputDialog.init
     InputDialog.init = function(dialog, ...)
-      if dialog.inputtext_class ~= InputText then
-        -- Disable for terminal
+      if not self.inject_remote_input or dialog.inputtext_class ~= InputText then
+        -- Disable for terminal or if disabled in settings
         return old_init(dialog, ...)
       end
       local remote_input_button_table = {
@@ -687,6 +688,7 @@ function RemoteNote:addToMainMenu(menu_items)
         callback = function(touchmenu_instance)
           self:show_port_dialog(touchmenu_instance)
         end,
+        separator = true,
       },
       {
         text = _("Enable HTTPS"),
@@ -716,9 +718,27 @@ function RemoteNote:addToMainMenu(menu_items)
             })
           end)
         end,
+        separator = true,
+      },
+      {
+        text = _("Allow remote input in all text input dialogs"),
+        checked_func = function()
+          return self.inject_remote_input
+        end,
+        callback = function(touchmenu_instance)
+          self.inject_remote_input = not self.inject_remote_input
+          G_reader_settings:saveSetting("remotenote_inject_remote_input", self.inject_remote_input)
+          if touchmenu_instance then touchmenu_instance:updateItems() end
+          UIManager:show(InfoMessage:new {
+            text = _("Restart KOReader for changes to take effect."),
+          })
+        end,
       },
       {
         text = _("Render inline 'Remote input' button"),
+        enabled_func = function ()
+          return self.inject_remote_input
+        end,
         checked_func = function()
           return self.render_inline_button
         end,
