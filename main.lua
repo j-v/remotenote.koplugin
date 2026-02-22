@@ -423,72 +423,58 @@ end
 function RemoteNote:handleRequest(data, client, client_ip)
   local method, uri = data:match("^(%u+) ([^\n]*) HTTP/%d%.%d\r?\n.*")
   if method == "GET" then
-    local html = ""
+    local page_heading = ""
+    local form_content = ""
+
     if self.context_type == "annotation" then
+      page_heading = "Add Note"
+
       local note_content = ""
       local annotation = self.ui.annotation.annotations[self.context_data.highlight_index]
       if annotation and annotation.note then
         note_content = util.htmlEscape(annotation.note)
       end
 
-      html = [[
-              <html>
-              <head>
-                  <title>Remote Note</title>
-                  <meta charset="utf-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1">
-              </head>
-              <body>
-              <h2>Add Note</h2>
-              <form method="POST">
-                  <textarea name="text" style="width:100%; height:150px;">]] .. note_content .. [[</textarea><br>
-                  <input type="submit" value="Save Note" style="width:100%; height:50px;">
-              </form>
-              </body>
-              </html>
-          ]]
+      form_content = [[<textarea name="text" style="width:100%; height:150px;">]] .. note_content .. [[</textarea><br>
+                  <input type="submit" value="Save Note" style="width:100%; height:50px;">]]
     elseif self.context_type == "input" then
+      page_heading = "Input Text"
+
       local current_text = ""
       if self.context_data.input_dialog and self.context_data.input_dialog.getInputText then
         current_text = util.htmlEscape(self.context_data.input_dialog:getInputText() or "")
       end
       
-      local is_readonly = false
       local is_single_line = false
-      if self.context_data.input_dialog then
-        if self.context_data.input_dialog.readonly then
-          is_readonly = true
-        end
-        if not self.context_data.input_dialog.allow_newline then
-          is_single_line = true
-        end
+      if self.context_data.input_dialog and not self.context_data.input_dialog.allow_newline then
+        is_single_line = true
       end
 
       local input_html = ""
       if is_single_line then
-        local input_type = "text"
-        input_html = [[<input type="]] .. input_type .. [[" name="text" style="width:100%; height:50px; font-size:16px;" value="]] .. current_text .. [[" ]] .. (is_readonly and " readonly" or "") .. [[><br>]]
+        input_html = [[<input type="text" name="text" style="width:100%; height:50px; font-size:16px;" value="]] .. current_text .. [["><br>]]
       else
-        input_html = [[<textarea name="text" style="width:100%; height:150px;"]] .. (is_readonly and " readonly" or "") .. [[>]] .. current_text .. [[</textarea><br>]]
+        input_html = [[<textarea name="text" style="width:100%; height:150px;">]] .. current_text .. [[</textarea><br>]]
       end
 
-      html = [[
-              <html>
-              <head>
-                  <title>Remote Input</title>
-                  <meta charset="utf-8">
-                  <meta name="viewport" content="width=device-width, initial-scale=1">
-              </head>
-              <body>
-              <h2>Input Text</h2>
-              <form method="POST">
-                  ]] .. input_html .. [[
-  ]] .. (is_readonly and "" or [[<input type="submit" value="Submit" style="width:100%; height:50px;">]]) .. [[
-              </form>
-              </body>
-              </html>
-          ]]
+      form_content = input_html .. ([[<input type="submit" value="Submit" style="width:100%; height:50px;">]])
     end
+
+    html = [[
+            <html>
+            <head>
+                <title>RemoteNote</title>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+            </head>
+            <body>
+            <h2>]] .. page_heading .. [[</h2>
+            <form method="POST">
+                ]] .. form_content .. [[
+            </form>
+            </body>
+            </html>
+        ]]
 
     client:send("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: " .. #html .. "\r\n\r\n" .. html)
     client:close()
