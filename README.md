@@ -56,7 +56,7 @@ When enabled, the plugin will automatically generate the required TLS certificat
 Forces the generation of new HTTPS certificates. (Only visible when HTTPS is enabled).
 
 ### Allow remote input in all text input dialogs
-Toggles the injection of the Remote Input functionality globally across the KOReader UI. Requires a restart to take effect after changing. Built-in by default.
+Toggles the injection of the Remote Input functionality globally across the KOReader UI. Requires a restart to take effect after changing. Enabled by default.
 
 ### Render inline 'Remote input' button
 Toggles how the "Remote input" button looks in dialogs. If checked, it will try to place it inline with the default KOReader buttons. If unchecked, it places it in a separate row within the dialog boundary. This option may be fragile and more prone to breaking with updates to KOReader. 
