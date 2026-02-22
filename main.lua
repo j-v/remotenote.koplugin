@@ -173,8 +173,10 @@ function RemoteNote:init()
 
       else -- Render button using addWidget
         local ret = old_init(dialog, ...)
+        dialog.init = old_init
 
         if not dialog._remoteInputWidgetAdded then
+          dialog._remoteInputWidgetAdded = true -- needs to get flagged before addWidget to avoid endless loop
           local btn_table = ButtonTable:new{
             id = "remote_input_table",
             width = dialog.width - 2*(dialog.button_padding or Size.padding.default),
@@ -183,7 +185,6 @@ function RemoteNote:init()
             show_parent = dialog,
           }
           dialog:addWidget(btn_table)
-          dialog._remoteInputWidgetAdded = true
         end
 
         return ret
