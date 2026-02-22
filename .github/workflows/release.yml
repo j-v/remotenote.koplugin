@@ -27,7 +27,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Step 2: Update version in _meta.lua based on the Git tag.
+      # Step 2: Set up Go environment
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: false
+
+      # Step 3: Update version in _meta.lua based on the Git tag.
       - name: Update version in _meta.lua
         run: |
           # Extract version from tag (e.g., v1.2.3 -> 1.2.3)
@@ -38,32 +45,23 @@ jobs:
           sed -i -E "s/(version\s*=\s*)[^,]+/\1\"${VERSION}\"/" _meta.lua
           cat _meta.lua
 
-      # Step 3: Create the directory structure and archive the project source into a zip file.
-      # We create a directory with the correct name first, copy the files into it, and then zip that directory.
-      - name: Archive project source with zip
-        run: |
-          PACKAGE_NAME="remotenote.koplugin"
-          ARCHIVE_NAME="${PACKAGE_NAME}-${GITHUB_REF_NAME}.zip"
-          # Create the directory structure for zipping
-          mkdir "$PACKAGE_NAME"
-          # Copy project files into the directory using a tar pipe, excluding unwanted files.
-          # This archives the current directory and immediately extracts it into the target directory.
-          tar c --exclude='./.*' --exclude='./*.md' --exclude="./$PACKAGE_NAME" . | tar x -C "$PACKAGE_NAME"
-          # Remove development helper files from the l10n directory (keep only .po files)
-          # echo "Cleaning up l10n directory, keeping only .po files..."
-          # find "$PACKAGE_NAME/l10n" -type f ! -name '*.po' -print -delete
-          # Create the final zip archive from the cleaned directory
-          zip -r "$ARCHIVE_NAME" "$PACKAGE_NAME"
+      # Step 4: Run build.sh to create architecture-specific zip files
+      - name: Build and package
+        run: bash ./build.sh
 
-      # Step 4: List files in the created archive for debugging purposes.
+      # Step 5: List files in the created archives for debugging purposes.
       - name: List archive contents
-        run: unzip -l remotenote.koplugin-${GITHUB_REF_NAME}.zip
+        run: |
+          for zipfile in build/*.zip; do
+            echo "Contents of $zipfile:"
+            unzip -l "$zipfile"
+          done
 
-      # Step 5: Create a GitHub Release and upload the archive as a release asset.
-      - name: Create Release and Upload Asset
+      # Step 6: Create a GitHub Release and upload the archives as release assets.
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           # Mark this release as a pre-release. Set to 'false' to create a full release.
           prerelease: true
           # The files to upload as release assets.
-          files: remotenote.koplugin-${{ github.ref_name }}.zip
+          files: build/*.zip

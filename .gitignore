@@ -46,3 +46,7 @@ luac.out
 # SSL certs
 key.pem
 cert.pem
+
+# Build output
+build/**
+bin/**

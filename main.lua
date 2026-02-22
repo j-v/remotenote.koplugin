@@ -1,5 +1,7 @@
 local ButtonDialog    = require("ui/widget/buttondialog")
 local InputDialog     = require("ui/widget/inputdialog")
+local InputText       = require("ui/widget/inputtext")
+local ButtonTable     = require("ui/widget/buttontable")
 local Device          = require("device")
 local InfoMessage     = require("ui/widget/infomessage")
 local QRWidget        = require("ui/widget/qrwidget")
@@ -22,6 +24,10 @@ local url             = require("socket.url")
 local Font            = require("ui/font")
 local util            = require("util")
 
+local current_plugin_dir = string.match(debug.getinfo(1).source, "^@(.*/)")
+local cert_path = joinPath(current_plugin_dir, "cert.pem")
+local key_path = joinPath(current_plugin_dir, "key.pem")
+
 local function get_local_ip()
   -- Any routable address outside your LAN works; 8.8.8.8:53 is common.
   local udp = assert(socket.udp())
@@ -33,6 +39,41 @@ local function get_local_ip()
   return ip, port
 end
 
+local function generateCerts(callback)
+
+  local certgen_path = joinPath(current_plugin_dir, "bin/certgen")
+  if util.pathExists(certgen_path) then
+    -- Execute certgen in the plugin directory so it drops the certs there
+    local cmd = string.format("cd %s && ./%s", current_plugin_dir, "bin/certgen")
+    logger.dbg("RemoteNote: Running command: " .. cmd)
+    local msg = InfoMessage:new {
+      text = _("Generating TLS certificates"),
+      dismissable = false,
+    }
+    UIManager:show(msg)
+    UIManager:nextTick(function ()
+      os.execute(cmd)
+      UIManager:close(msg)
+      callback()
+    end)
+  else
+    UIManager:show(InfoMessage:new {
+      text = T(_("Error: TLS certificate generator binary (%1) not found."), certgen_path),
+    })
+  end
+end
+
+local function ensureCerts(callback)
+  if not (util.pathExists(cert_path) and util.pathExists(key_path)) then
+    generateCerts(function()
+      callback()
+    end)
+  else
+    callback()
+  end
+end
+
+
 local RemoteNote = WidgetContainer:extend {
   name = "remotenote",
   is_doc_only = false,
@@ -41,6 +82,8 @@ local RemoteNote = WidgetContainer:extend {
 function RemoteNote:init()
   self.port = G_reader_settings:readSetting("remotenote_port") or 8089
   self.https_enabled = G_reader_settings:isTrue("remotenote_https_enabled")
+  self.render_inline_button = G_reader_settings:isTrue("remotenote_render_inline_button")
+  self.inject_remote_input = G_reader_settings:readSetting("remotenote_inject_remote_input") ~= false
   self.dialog_font_face = Font:getFace("infofont")
   self.ui.menu:registerToMainMenu(self)
   if self.ui.highlight then
@@ -57,7 +100,7 @@ function RemoteNote:init()
           local connect_callback = function()
             highlight_manager:onClose()
             if index then
-              self:openRemoteNoteQrDialog(index, is_new_note)
+              self:openRemoteQrDialog("annotation", { highlight_index = index, is_new_note = is_new_note })
             end
           end
 
@@ -85,37 +128,70 @@ function RemoteNote:init()
         return res
       end
     end
+  end
 
-    if self.ui.bookmark then
-      -- Hook ReaderBookmark:setBookmarkNote to inject Remote Note button
-      if self.ui.bookmark.setBookmarkNote then
-        local old_setBookmarkNote = self.ui.bookmark.setBookmarkNote
-        self.ui.bookmark.setBookmarkNote = function(bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
-          local old_uiManagerShow = UIManager.show
-          ---@diagnostic disable-next-line: duplicate-set-field
-          UIManager.show = function(uimgr, widget, ...)
-            if widget.title == _("Edit note") then
-              -- Determine index based on context (bookmark menu vs highlight)
-              local index
-              if bookmark_obj.bookmark_menu then
-                index = bookmark_obj:getBookmarkItemIndex(item_or_index)
-              else
-                index = item_or_index
-              end
-              self:injectRemoteNoteButton(widget, index, is_new_note)
-            end
-
-            return old_uiManagerShow(uimgr, widget, ...)
-          end
-
-          local ok, res = pcall(old_setBookmarkNote, bookmark_obj, item_or_index, is_new_note, new_note, caller_callback)
-          UIManager.show = old_uiManagerShow
-          if not ok then error(res) end
-
-          return res
-        end
+  if InputDialog.init and not InputDialog._remotenote_hooked then
+    local old_init = InputDialog.init
+    InputDialog.init = function(dialog, ...)
+      if not self.inject_remote_input or dialog.inputtext_class ~= InputText then
+        -- Disable for terminal or if disabled in settings
+        return old_init(dialog, ...)
       end
+      local remote_input_button_table = {
+        text = _("Remote input"),
+        id = "remote_input",
+        keep_menu_open = true,
+        callback = function()
+          local connect_callback = function()
+            self:openRemoteQrDialog("input", { input_dialog = dialog })
+          end
+          NetworkMgr:runWhenConnected(connect_callback)
+        end,
+      }
+      if self.render_inline_button then
+        -- Ensure we only add the button once per dialog
+        local already_added = false
+        if dialog.buttons then
+          for _, row in ipairs(dialog.buttons) do
+            for _, btn in ipairs(row) do
+              if btn.id == "remote_input" then
+                already_added = true
+                break
+              end
+            end
+          end
+        else
+          dialog.buttons = {{}}
+        end
+
+        if not already_added then
+          if not dialog.buttons[1] then dialog.buttons[1] = {} end
+          table.insert(dialog.buttons[1], 1, remote_input_button_table)
+        end
+
+        return old_init(dialog, ...)
+
+      else -- Render button using addWidget
+        local ret = old_init(dialog, ...)
+
+        if not dialog._remoteInputWidgetAdded then
+          local btn_table = ButtonTable:new{
+            id = "remote_input_table",
+            width = dialog.width - 2*(dialog.button_padding or Size.padding.default),
+            buttons = { { remote_input_button_table } },
+            zero_sep = true,
+            show_parent = dialog,
+          }
+          dialog:addWidget(btn_table)
+          dialog._remoteInputWidgetAdded = true
+        end
+
+        return ret
+      end
+
     end
+
+    InputDialog._remotenote_hooked = true
   end
 end
 
@@ -139,6 +215,38 @@ function RemoteNote:CloseServer()
   end
 end
 
+function RemoteNote:startServer(callback)
+  if self.https_enabled then
+    ensureCerts(function()
+      self.server = SecureTCPServer:new {
+        host = "*",
+        port = self.port,
+        ssl_params = {
+          mode = "server",
+          protocol = "any",
+          key = key_path,
+          certificate = cert_path,
+          options = { "all", "no_sslv2", "no_sslv3" },
+        },
+        receiveCallback = function(data, client, client_ip, client_port)
+          return self:handleRequest(data, client, client_ip)
+        end,
+      }
+      callback()
+    end)
+  else
+    self.server = SimpleTCPServer:new {
+      host = "*",
+      port = self.port,
+      receiveCallback = function(data, client)
+        local client_ip, _ = client:getpeername()
+        return self:handleRequest(data, client, client_ip)
+      end,
+    }
+    callback()
+  end
+end
+
 function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
   -- InputDialog uses buttons for reinit, TextViewer uses buttons_table
   local buttons_table = widget.buttons or widget.buttons_table
@@ -149,7 +257,7 @@ function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
       text = _("Remote edit note"),
       callback = function()
         UIManager:close(widget)
-        self:openRemoteNoteQrDialog(index, is_new_note)
+        self:openRemoteQrDialog("annotation", { highlight_index = index, is_new_note = is_new_note })
       end,
     }
   }
@@ -191,8 +299,14 @@ function RemoteNote:injectRemoteNoteButton(widget, index, is_new_note)
   end
 end
 
-function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
-  self.is_new_note = is_new_note
+function RemoteNote:openRemoteQrDialog(context_type, context_data)
+  self.context_type = context_type
+  self.context_data = context_data
+
+  if context_type == "input" and context_data.input_dialog and context_data.input_dialog.onCloseKeyboard then
+    context_data.input_dialog:onCloseKeyboard()
+  end
+
   -- Cleanup existing server if any
   self:CloseServer()
 
@@ -211,212 +325,231 @@ function RemoteNote:openRemoteNoteQrDialog(highlight_index, is_new_note)
   end
 
   -- Start Server
-  if self.https_enabled then
-    local current_plugin_dir = string.match(debug.getinfo(1).source, "^@(.*/)")
-    local cert_path = joinPath(current_plugin_dir, "cert.pem")
-    local key_path = joinPath(current_plugin_dir, "key.pem")
+  self:startServer(function() 
 
-    if not util.pathExists(cert_path) or not util.pathExists(key_path) then
+    UIManager:insertZMQ(self.server)
+    local ok_server, err = self.server:start()
+    if not ok_server then
+      -- cleanup just in case
+      self.server = nil
       UIManager:show(InfoMessage:new {
-        text = _("HTTPS enabled but certificates missing.\nPlease generate cert.pem and key.pem in the remotenote.koplugin directory or disable HTTPS."),
+        text = T(_("Failed to start server: %1"), err),
       })
-      self:CloseServer()
       return
     end
 
-    self.server = SecureTCPServer:new {
-      host = "*",
-      port = self.port,
-      ssl_params = {
-        mode = "server",
-        protocol = "any",
-        key = key_path,
-        certificate = cert_path,
-        options = { "all", "no_sslv2", "no_sslv3" },
-      },
-      receiveCallback = function(data, client, client_ip, client_port)
-        return self:handleRequest(data, client, highlight_index, client_ip)
-      end,
-    }
-  else
-    self.server = SimpleTCPServer:new {
-      host = "*",
-      port = self.port,
-      receiveCallback = function(data, client)
-        local client_ip, _ = client:getpeername()
-        return self:handleRequest(data, client, highlight_index, client_ip)
-      end,
-    }
-  end
+    local protocol = self.https_enabled and "https" or "http"
+    local server_url = string.format("%s://%s:%d/", protocol, ip, self.port)
 
-  UIManager:insertZMQ(self.server)
-  local ok_server, err = self.server:start()
-  if not ok_server then
-    -- cleanup just in case
-    self.server = nil
-    UIManager:show(InfoMessage:new {
-      text = T(_("Failed to start server: %1"), err),
-    })
-    return
-  end
+    local qr_size = Device.screen:scaleBySize(350)
 
-  local protocol = self.https_enabled and "https" or "http"
-  local server_url = string.format("%s://%s:%d/", protocol, ip, self.port)
-
-  local qr_size = Device.screen:scaleBySize(350)
-
-  local cleanup = function()
-    self:CloseServer()
-    if is_new_note and highlight_index then
-      logger.info("RemoteNote: Removing cancelled highlight")
-      self.ui.highlight:deleteHighlight(highlight_index)
-    end
-  end
-
-  -- Show Dialog (protected call)
-  local ok_ui, dialog_or_err = pcall(function()
-    local dialog = ButtonDialog:new {
-      buttons = { {
-        {
-          text = _("Cancel"),
-          callback = function()
-            cleanup()
-            UIManager:close(self.dialog)
-          end,
-        }
-      } },
-      tap_close_callback = function()
-        cleanup()
-        self.dialog = nil
+    local cleanup = function()
+      self:CloseServer()
+      if self.context_type == "annotation" and self.context_data.is_new_note and self.context_data.highlight_index then
+        logger.info("RemoteNote: Removing cancelled highlight")
+        self.ui.highlight:deleteHighlight(self.context_data.highlight_index)
       end
-    }
+    end
 
-    local available_width = dialog:getAddedWidgetAvailableWidth()
-
-    local description_widget = TextBoxWidget:new {
-      text = _("On another device, connect to the same network as your reader and open the link below:"),
-      face = self.dialog_font_face,
-      alignment = "left",
-      width = available_width,
-    }
-    local qr_code = FrameContainer:new {
-      padding = Size.padding.large,
-      bordersize = 0,
-      QRWidget:new {
-        text = server_url,
-        width = qr_size,
-        height = qr_size,
+    -- Show Dialog (protected call)
+    local ok_ui, dialog_or_err = pcall(function()
+      local dialog = ButtonDialog:new {
+        dismissable = false,
+        buttons = { {
+          {
+            text = _("Cancel"),
+            callback = function()
+              cleanup()
+              UIManager:close(self.dialog)
+            end,
+          }
+        } },
+        tap_close_callback = function()
+          cleanup()
+          self.dialog = nil
+        end
       }
-    }
-    local url_widget = TextBoxWidget:new {
-      text = server_url,
-      face = self.dialog_font_face,
-      alignment = "center",
-      width = available_width,
-    }
 
-    local content = VerticalGroup:new {
-      align = "center",
-      description_widget,
-      qr_code,
-      url_widget,
-    }
+      local available_width = dialog:getAddedWidgetAvailableWidth()
 
-    dialog:addWidget(content)
-    return dialog
+      local description_widget = TextBoxWidget:new {
+        text = _("On another device, connect to the same network as your reader and open the link below:"),
+        face = self.dialog_font_face,
+        alignment = "left",
+        width = available_width,
+      }
+      local qr_code = FrameContainer:new {
+        padding = Size.padding.large,
+        bordersize = 0,
+        QRWidget:new {
+          text = server_url,
+          width = qr_size,
+          height = qr_size,
+        }
+      }
+      local url_widget = TextBoxWidget:new {
+        text = server_url,
+        face = self.dialog_font_face,
+        alignment = "center",
+        width = available_width,
+      }
+
+      local content = VerticalGroup:new {
+        align = "center",
+        description_widget,
+        qr_code,
+        url_widget,
+      }
+
+      dialog:addWidget(content)
+      return dialog
+    end)
+
+    if not ok_ui then
+      -- Error creating UI, stop server
+      logger.err("RemoteNote: Error creating UI:", dialog_or_err)
+      cleanup()
+      UIManager:show(InfoMessage:new {
+        text = T(_("Error starting RemoteNote: %1"), dialog_or_err),
+      })
+      return
+    end
+
+    self.dialog = dialog_or_err
+    UIManager:show(self.dialog)
   end)
-
-  if not ok_ui then
-    -- Error creating UI, stop server
-    logger.err("RemoteNote: Error creating UI:", dialog_or_err)
-    cleanup()
-    UIManager:show(InfoMessage:new {
-      text = T(_("Error starting RemoteNote: %1"), dialog_or_err),
-    })
-    return
-  end
-
-  self.dialog = dialog_or_err
-  UIManager:show(self.dialog)
 end
 
-function RemoteNote:handleRequest(data, client, highlight_index, client_ip)
+function RemoteNote:handleRequest(data, client, client_ip)
   local method, uri = data:match("^(%u+) ([^\n]*) HTTP/%d%.%d\r?\n.*")
   if method == "GET" then
-    local note_content = ""
-    local annotation = self.ui.annotation.annotations[highlight_index]
-    if annotation and annotation.note then
-      note_content = util.htmlEscape(annotation.note)
+    local page_heading = ""
+    local form_content = ""
+
+    if self.context_type == "annotation" then
+      page_heading = "Add Note"
+
+      local note_content = ""
+      local annotation = self.ui.annotation.annotations[self.context_data.highlight_index]
+      if annotation and annotation.note then
+        note_content = util.htmlEscape(annotation.note)
+      end
+
+      form_content = [[<textarea name="text" style="width:100%; height:150px;">]] .. note_content .. [[</textarea><br>
+                  <input type="submit" value="Save Note" style="width:100%; height:50px;">]]
+    elseif self.context_type == "input" then
+      page_heading = "Input Text"
+
+      local current_text = ""
+      if self.context_data.input_dialog and self.context_data.input_dialog.getInputText then
+        current_text = util.htmlEscape(self.context_data.input_dialog:getInputText() or "")
+      end
+      
+      local is_single_line = false
+      if self.context_data.input_dialog and not self.context_data.input_dialog.allow_newline then
+        is_single_line = true
+      end
+
+      local input_html = ""
+      if is_single_line then
+        input_html = [[<input type="text" name="text" style="width:100%; height:50px; font-size:16px;" value="]] .. current_text .. [["><br>]]
+      else
+        input_html = [[<textarea name="text" style="width:100%; height:150px;">]] .. current_text .. [[</textarea><br>]]
+      end
+
+      form_content = input_html .. ([[<input type="submit" value="Submit" style="width:100%; height:50px;">]])
     end
 
-    local html = [[
+    html = [[
             <html>
             <head>
-                <title>Remote Note</title>
+                <title>RemoteNote</title>
+                <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
             </head>
             <body>
-            <h2>Add Note</h2>
+            <h2>]] .. page_heading .. [[</h2>
             <form method="POST">
-                <textarea name="note" style="width:100%; height:150px;">]] .. note_content .. [[</textarea><br>
-                <input type="submit" value="Save Note" style="width:100%; height:50px;">
+                ]] .. form_content .. [[
             </form>
             </body>
             </html>
         ]]
+
     client:send("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nContent-Length: " .. #html .. "\r\n\r\n" .. html)
     client:close()
     UIManager:nextTick(function()
-      self:showEditingDialog(highlight_index, client_ip)
+      self:showEditingDialog(client_ip)
     end)
+
   elseif method == "POST" then
     local content_length = tonumber(data:lower():match("content%-length: (%d+)"))
     if content_length then
       local body, err = client:receive(content_length)
       if body then
-        local note = body:match("note=([^&]*)")
-        if note then
-          note = url.unescape(note):gsub("+", " ")
-          -- Save Note
-          UIManager:nextTick(function()
-            local annotation = self.ui.annotation.annotations[highlight_index]
-            if annotation then
-              local old_note = annotation.note
-              -- Check if note actually changed
-              if old_note ~= note then
-                annotation.note = note
-                if self.ui.highlight.writePdfAnnotation then
-                  self.ui.highlight:writePdfAnnotation("content", annotation, note)
+        local text = body:match("text=([^&]*)")
+
+        if text then
+          text = url.unescape((text:gsub("%+", " ")))
+          
+          if self.context_type == "annotation" then
+            -- Save Note
+            UIManager:nextTick(function()
+              local annotation = self.ui.annotation.annotations[self.context_data.highlight_index]
+              if annotation then
+                local old_note = annotation.note
+                -- Check if note actually changed
+                if old_note ~= text then
+                  annotation.note = text
+                  if self.ui.highlight.writePdfAnnotation then
+                    self.ui.highlight:writePdfAnnotation("content", annotation, text)
+                  end
+
+                  -- Notify about changes
+                  -- This updates the bookmark icon and statistics
+                  local type_before = self.ui.bookmark.getBookmarkType(annotation)
+                  -- forcing type update if it was just a highlight
+                  if type_before == "highlight" then
+                    self.ui:handleEvent(Event:new("AnnotationsModified",
+                      { annotation, nb_highlights_added = -1, nb_notes_added = 1 }))
+                  else
+                    self.ui:handleEvent(Event:new("AnnotationsModified",
+                      { annotation, nb_highlights_added = 0, nb_notes_added = 0 }))
+                  end
                 end
 
-                -- Notify about changes
-                -- This updates the bookmark icon and statistics
-                local type_before = self.ui.bookmark.getBookmarkType(annotation)
-                -- forcing type update if it was just a highlight
-                if type_before == "highlight" then
-                  self.ui:handleEvent(Event:new("AnnotationsModified",
-                    { annotation, nb_highlights_added = -1, nb_notes_added = 1 }))
-                else
-                  self.ui:handleEvent(Event:new("AnnotationsModified",
-                    { annotation, nb_highlights_added = 0, nb_notes_added = 0 }))
+                UIManager:show(InfoMessage:new {
+                  text = _("Remote note saved!"),
+                })
+                if self.dialog then
+                  UIManager:close(self.dialog)
+                end
+                self:CloseServer()
+              end
+            end)
+          elseif self.context_type == "input" then
+            UIManager:nextTick(function()
+              if self.context_data.input_dialog and self.context_data.input_dialog.setInputText then
+                if not self.context_data.input_dialog.readonly then
+                  self.context_data.input_dialog:setInputText(text, true)
                 end
               end
 
               UIManager:show(InfoMessage:new {
-                text = _("Remote note saved!"),
+                text = _("Remote input updated!"),
               })
               if self.dialog then
                 UIManager:close(self.dialog)
               end
               self:CloseServer()
-            end
-          end)
+            end)
+          end
 
           local html = [[
                         <html>
                         <head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
                         <body>
-                        <h2>Note Saved!</h2>
+                        <h2>Saved!</h2>
                         <p>You can close this page.</p>
                         </body>
                         </html>
@@ -442,20 +575,21 @@ function RemoteNote:handleRequest(data, client, highlight_index, client_ip)
   end
 end
 
-function RemoteNote:showEditingDialog(highlight_index, client_ip)
+function RemoteNote:showEditingDialog(client_ip)
   if self.dialog then
     UIManager:close(self.dialog)
   end
 
   local cleanup = function()
     self:CloseServer()
-    if self.is_new_note and highlight_index then
+    if self.context_type == "annotation" and self.context_data.is_new_note and self.context_data.highlight_index then
       logger.info("RemoteNote: Removing cancelled highlight")
-      self.ui.highlight:deleteHighlight(highlight_index)
+      self.ui.highlight:deleteHighlight(self.context_data.highlight_index)
     end
   end
 
   local dialog = ButtonDialog:new {
+    dismissable = false,
     buttons = { {
       {
         text = _("Cancel"),
@@ -473,9 +607,9 @@ function RemoteNote:showEditingDialog(highlight_index, client_ip)
 
   local available_width = dialog:getAddedWidgetAvailableWidth()
 
-  local text_content = _("Note is being edited...")
+  local text_content = _("Content is being edited...")
   if client_ip then
-      text_content = T(_("Note is being edited by %1..."), client_ip)
+      text_content = T(_("Content is being edited by %1..."), client_ip)
   end
 
   local text_widget = TextBoxWidget:new {
@@ -542,6 +676,7 @@ function RemoteNote:addToMainMenu(menu_items)
         callback = function(touchmenu_instance)
           self:show_port_dialog(touchmenu_instance)
         end,
+        separator = true,
       },
       {
         text = _("Enable HTTPS"),
@@ -553,10 +688,52 @@ function RemoteNote:addToMainMenu(menu_items)
           G_reader_settings:saveSetting("remotenote_https_enabled", self.https_enabled)
           if touchmenu_instance then touchmenu_instance:updateItems() end
           if self.https_enabled then
-            UIManager:show(InfoMessage:new {
-              text = _("RemoteNote server will use cert.pem and key.pem located in plugins/remotenote.koplugin directory."),
-            })
+            ensureCerts(function() end)
           end
+        end,
+      },
+      {
+        text = _("Refresh TLS certificates"),
+        enabled_func = function()
+          return self.https_enabled
+        end,
+        callback = function()
+          os.remove(cert_path)
+          os.remove(key_path)
+          generateCerts(function()
+            UIManager:show(InfoMessage:new {
+              text = _("TLS certificates refreshed successfully."),
+            })
+          end)
+        end,
+        separator = true,
+      },
+      {
+        text = _("Allow remote input in all text input dialogs"),
+        checked_func = function()
+          return self.inject_remote_input
+        end,
+        callback = function(touchmenu_instance)
+          self.inject_remote_input = not self.inject_remote_input
+          G_reader_settings:saveSetting("remotenote_inject_remote_input", self.inject_remote_input)
+          if touchmenu_instance then touchmenu_instance:updateItems() end
+          UIManager:show(InfoMessage:new {
+            text = _("Restart KOReader for changes to take effect."),
+          })
+        end,
+      },
+      {
+        text = _("Render inline 'Remote input' button"),
+        enabled_func = function ()
+          return self.inject_remote_input
+        end,
+        checked_func = function()
+          return self.render_inline_button
+        end,
+        callback = function(touchmenu_instance)
+          self.render_inline_button = not self.render_inline_button
+          G_reader_settings:saveSetting("remotenote_render_inline_button", self.render_inline_button)
+          if touchmenu_instance then touchmenu_instance:updateItems() end
         end,
       },
     }
