@@ -14,9 +14,12 @@ Tested working on an old Kindle Paperwhite. Your experience may vary.
 - **Remote Note**: Type in notes for passages you highlight within a book.
 - **Remote Input**: A "Remote input" button is seamlessly injected into standard KOReader text input dialogs (e.g. search boxes, library settings), allowing you to fill them using a remote device.
 
-## Demo
-
+## Demos
+### Creating a note
 ![remote-note-demo-fast](https://github.com/user-attachments/assets/0c1f2240-46a4-4116-a0e1-49f5704960e7)
+
+### Editing a review
+![RemoteNote-ReviewEditDemo-White-drop](https://github.com/user-attachments/assets/86a675b3-979a-4858-8faa-0de0e7c345fc)
 
 ## Known issues
 
