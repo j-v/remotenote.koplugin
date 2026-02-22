@@ -435,6 +435,7 @@ function RemoteNote:handleRequest(data, client, client_ip)
               <html>
               <head>
                   <title>Remote Note</title>
+                  <meta charset="utf-8">
                   <meta name="viewport" content="width=device-width, initial-scale=1">
               </head>
               <body>
@@ -475,6 +476,7 @@ function RemoteNote:handleRequest(data, client, client_ip)
               <html>
               <head>
                   <title>Remote Input</title>
+                  <meta charset="utf-8">
                   <meta name="viewport" content="width=device-width, initial-scale=1">
               </head>
               <body>
@@ -502,7 +504,7 @@ function RemoteNote:handleRequest(data, client, client_ip)
         local text = body:match("text=([^&]*)")
 
         if text then
-          text = url.unescape(text):gsub("+", " ")
+          text = url.unescape((text:gsub("%+", " ")))
           
           if self.context_type == "annotation" then
             -- Save Note
