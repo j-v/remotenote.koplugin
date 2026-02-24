@@ -363,13 +363,22 @@ function RemoteNote:openRemoteQrDialog(context_type, context_data)
               cleanup()
               UIManager:close(self.dialog)
             end,
-          }
+          },
         } },
         tap_close_callback = function()
           cleanup()
           self.dialog = nil
         end
       }
+      if Device:canOpenLink() then
+        local open_link_button = {
+          text = _("Open on this device"),
+          callback = function()
+            Device:openLink(server_url)
+          end,
+        }
+        table.insert(dialog.buttons[1], 1, open_link_button)
+      end
 
       local available_width = dialog:getAddedWidgetAvailableWidth()
 
