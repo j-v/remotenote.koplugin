@@ -1,6 +1,8 @@
+local Blitbuffer = require("ffi/blitbuffer")
 local ButtonDialog    = require("ui/widget/buttondialog")
 local InputDialog     = require("ui/widget/inputdialog")
 local InputText       = require("ui/widget/inputtext")
+local Button          = require("ui/widget/button")
 local ButtonTable     = require("ui/widget/buttontable")
 local Device          = require("device")
 local InfoMessage     = require("ui/widget/infomessage")
@@ -14,6 +16,7 @@ local VerticalGroup   = require("ui/widget/verticalgroup")
 local NetworkMgr      = require("ui/network/manager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local FrameContainer  = require("ui/widget/container/framecontainer")
+local UnderlineContainer = require("ui/widget/container/underlinecontainer")
 local Size            = require("ui/size")
 local socket          = require("socket")
 local logger          = require("logger")
@@ -370,15 +373,6 @@ function RemoteNote:openRemoteQrDialog(context_type, context_data)
           self.dialog = nil
         end
       }
-      if Device:canOpenLink() then
-        local open_link_button = {
-          text = _("Open on this device"),
-          callback = function()
-            Device:openLink(server_url)
-          end,
-        }
-        table.insert(dialog.buttons[1], 1, open_link_button)
-      end
 
       local available_width = dialog:getAddedWidgetAvailableWidth()
 
@@ -397,12 +391,29 @@ function RemoteNote:openRemoteQrDialog(context_type, context_data)
           height = qr_size,
         }
       }
-      local url_widget = TextBoxWidget:new {
-        text = server_url,
-        face = self.dialog_font_face,
-        alignment = "center",
-        width = available_width,
-      }
+      local url_widget = nil
+      if Device:canOpenLink() then
+        url_widget = UnderlineContainer:new {
+          Button:new {
+            text = server_url,
+            callback = function()
+              Device:openLink(server_url)
+            end,
+            bordersize = 0,
+            text_font_bold = false,
+          },
+          color = Blitbuffer.COLOR_BLACK,
+          linesize = Size.line.thin,
+          padding = 0,
+        }
+      else
+        url_widget = TextBoxWidget:new {
+          text = server_url,
+          face = self.dialog_font_face,
+          alignment = "center",
+          width = available_width,
+        }
+      end
 
       local content = VerticalGroup:new {
         align = "center",
