@@ -9,6 +9,8 @@ Adding annotations to your e-books is super useful, but typing on the on-screen 
 
 Tested working on an old Kindle Paperwhite. Your experience may vary.
 
+KOReader minimum version: 2025.10 - other versions may not be supported 
+
 ## Features
 
 - **Remote Note**: Type in notes for passages you highlight within a book.
